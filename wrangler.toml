@@ -1,0 +1,11 @@
+name = "micaiahs-worker"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+ENVIRONMENT = "production"
+
+# Service binding to The Board worker
+[[services]]
+binding = "BOARD"
+service = "the-board"
