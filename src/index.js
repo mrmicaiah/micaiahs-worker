@@ -1,6 +1,7 @@
-// Micaiah's Worker - MCP Server for The Board
+// Micaiah's Worker - MCP Server for The Board + Manus AI
 
 const BOARD_API = 'https://the-board.micaiah-tasks.workers.dev';
+const MANUS_API = 'https://api.manus.ai/v1';
 let globalEnv = null;
 
 export default {
@@ -84,7 +85,7 @@ async function handleMCPMessage(message, env) {
           capabilities: { tools: {} },
           serverInfo: {
             name: 'micaiahs-worker',
-            version: '1.0.0'
+            version: '1.1.0'
           }
         }
       };
@@ -122,6 +123,42 @@ async function handleMCPMessage(message, env) {
 
 function getToolDefinitions() {
   return [
+    // ===== MANUS AI TOOLS =====
+    {
+      name: 'manus_research',
+      description: 'Send a research task to Manus AI. Manus will autonomously research the topic and return comprehensive results. Good for competitor analysis, market research, technical deep-dives, or any complex research task.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'The research task or question for Manus to investigate' },
+          wait: { type: 'boolean', description: 'If true, wait for completion (may take minutes). If false, returns task ID for later polling. Default: false' }
+        },
+        required: ['prompt']
+      }
+    },
+    {
+      name: 'manus_status',
+      description: 'Check the status of a Manus task by its ID',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'The Manus task ID to check' }
+        },
+        required: ['task_id']
+      }
+    },
+    {
+      name: 'manus_result',
+      description: 'Get the result of a completed Manus task',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'The Manus task ID to get results for' }
+        },
+        required: ['task_id']
+      }
+    },
+    // ===== BOARD TOOLS =====
     {
       name: 'board_status',
       description: 'Show the current state of The Board - all projects, tasks, and notepads',
@@ -322,6 +359,14 @@ function getToolDefinitions() {
 async function executeTool(name, args, env) {
   try {
     switch (name) {
+      // Manus tools
+      case 'manus_research':
+        return await manusResearch(args.prompt, args.wait, env);
+      case 'manus_status':
+        return await manusStatus(args.task_id, env);
+      case 'manus_result':
+        return await manusResult(args.task_id, env);
+      // Board tools
       case 'board_status':
         return await getBoardStatus();
       case 'board_log':
@@ -366,7 +411,133 @@ async function executeTool(name, args, env) {
   }
 }
 
-// API helpers
+// ===== MANUS AI FUNCTIONS =====
+
+async function manusResearch(prompt, wait = false, env) {
+  const apiKey = env?.MANUS_API_KEY;
+  if (!apiKey) {
+    return '❌ MANUS_API_KEY not configured. Add it to your Cloudflare Worker environment variables.';
+  }
+
+  try {
+    // Create the task
+    const createRes = await fetch(`${MANUS_API}/tasks`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ prompt })
+    });
+
+    if (!createRes.ok) {
+      const errorText = await createRes.text();
+      return `❌ Manus API error (${createRes.status}): ${errorText}`;
+    }
+
+    const task = await createRes.json();
+    const taskId = task.id || task.task_id;
+
+    if (!taskId) {
+      return `❌ Manus returned unexpected response: ${JSON.stringify(task)}`;
+    }
+
+    if (!wait) {
+      return `🚀 **Manus task started**\n\nTask ID: \`${taskId}\`\n\nManus is working on this in the background. Use \`manus_status\` or \`manus_result\` to check progress.\n\nPrompt: ${prompt}`;
+    }
+
+    // If wait=true, poll for completion (with timeout)
+    const maxWaitMs = 5 * 60 * 1000; // 5 minutes max
+    const pollIntervalMs = 5000; // 5 seconds
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+
+      const statusRes = await fetch(`${MANUS_API}/tasks/${taskId}`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+
+      if (!statusRes.ok) continue;
+
+      const statusData = await statusRes.json();
+      const status = statusData.status?.toLowerCase();
+
+      if (status === 'completed' || status === 'done' || status === 'finished') {
+        const result = statusData.result || statusData.output || statusData.response || 'No result content';
+        return `✅ **Manus research complete**\n\nTask ID: \`${taskId}\`\n\n---\n\n${result}`;
+      }
+
+      if (status === 'failed' || status === 'error') {
+        return `❌ Manus task failed: ${statusData.error || 'Unknown error'}`;
+      }
+    }
+
+    return `⏱️ **Manus task still running**\n\nTask ID: \`${taskId}\`\n\nThe task is taking longer than 5 minutes. Use \`manus_result\` to check later.`;
+
+  } catch (error) {
+    return `❌ Manus error: ${error.message}`;
+  }
+}
+
+async function manusStatus(taskId, env) {
+  const apiKey = env?.MANUS_API_KEY;
+  if (!apiKey) {
+    return '❌ MANUS_API_KEY not configured.';
+  }
+
+  try {
+    const res = await fetch(`${MANUS_API}/tasks/${taskId}`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!res.ok) {
+      return `❌ Manus API error (${res.status}): ${await res.text()}`;
+    }
+
+    const data = await res.json();
+    const status = data.status || 'unknown';
+    const progress = data.progress ? ` (${data.progress}%)` : '';
+
+    return `📊 **Manus Task Status**\n\nTask ID: \`${taskId}\`\nStatus: **${status}**${progress}\n\n${data.status_message || ''}`;
+
+  } catch (error) {
+    return `❌ Error checking status: ${error.message}`;
+  }
+}
+
+async function manusResult(taskId, env) {
+  const apiKey = env?.MANUS_API_KEY;
+  if (!apiKey) {
+    return '❌ MANUS_API_KEY not configured.';
+  }
+
+  try {
+    const res = await fetch(`${MANUS_API}/tasks/${taskId}`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!res.ok) {
+      return `❌ Manus API error (${res.status}): ${await res.text()}`;
+    }
+
+    const data = await res.json();
+    const status = data.status?.toLowerCase();
+
+    if (status !== 'completed' && status !== 'done' && status !== 'finished') {
+      return `⏳ Task not yet complete.\n\nStatus: **${data.status}**\n\nUse \`manus_status\` to check progress.`;
+    }
+
+    const result = data.result || data.output || data.response || 'No result content found';
+    return `✅ **Manus Result**\n\nTask ID: \`${taskId}\`\n\n---\n\n${result}`;
+
+  } catch (error) {
+    return `❌ Error getting result: ${error.message}`;
+  }
+}
+
+// ===== BOARD API HELPERS =====
+
 async function apiGet(path) {
   if (globalEnv?.BOARD) {
     const res = await globalEnv.BOARD.fetch(`https://the-board${path}`);
@@ -419,7 +590,8 @@ async function apiDelete(path) {
   return res.json();
 }
 
-// Tool implementations
+// ===== BOARD TOOL IMPLEMENTATIONS =====
+
 async function getBoardStatus() {
   const data = await apiGet('/api/board');
   
