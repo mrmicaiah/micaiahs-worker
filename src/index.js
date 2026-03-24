@@ -85,7 +85,7 @@ async function handleMCPMessage(message, env) {
           capabilities: { tools: {} },
           serverInfo: {
             name: 'micaiahs-worker',
-            version: '1.1.0'
+            version: '1.2.0'
           }
         }
       };
@@ -411,6 +411,57 @@ async function executeTool(name, args, env) {
   }
 }
 
+// ===== MANUS RESPONSE FORMATTER =====
+
+function formatManusResponse(data) {
+  // If it's already a string, return it
+  if (typeof data === 'string') {
+    return data;
+  }
+  
+  // If it's null or undefined
+  if (data == null) {
+    return 'No content';
+  }
+  
+  // If it's an array, format each item
+  if (Array.isArray(data)) {
+    return data.map((item, index) => {
+      if (typeof item === 'string') {
+        return item;
+      }
+      // Handle common Manus response structures
+      if (item.type === 'text' && item.text) {
+        return item.text;
+      }
+      if (item.content) {
+        return formatManusResponse(item.content);
+      }
+      if (item.message) {
+        return item.message;
+      }
+      // Fallback: pretty print the object
+      return JSON.stringify(item, null, 2);
+    }).join('\n\n');
+  }
+  
+  // If it's an object with common fields
+  if (typeof data === 'object') {
+    // Check for text content
+    if (data.text) return data.text;
+    if (data.content) return formatManusResponse(data.content);
+    if (data.message) return data.message;
+    if (data.output) return formatManusResponse(data.output);
+    if (data.result) return formatManusResponse(data.result);
+    
+    // Fallback: pretty print
+    return JSON.stringify(data, null, 2);
+  }
+  
+  // Fallback for primitives
+  return String(data);
+}
+
 // ===== MANUS AI FUNCTIONS =====
 
 async function manusResearch(prompt, wait = false, env) {
@@ -464,8 +515,9 @@ async function manusResearch(prompt, wait = false, env) {
       const status = statusData.status?.toLowerCase();
 
       if (status === 'completed' || status === 'done' || status === 'finished') {
-        const result = statusData.result || statusData.output || statusData.response || 'No result content';
-        return `✅ **Manus research complete**\n\nTask ID: \`${taskId}\`\n\n---\n\n${result}`;
+        const resultContent = statusData.result || statusData.output || statusData.response || statusData;
+        const formatted = formatManusResponse(resultContent);
+        return `✅ **Manus research complete**\n\nTask ID: \`${taskId}\`\n\n---\n\n${formatted}`;
       }
 
       if (status === 'failed' || status === 'error') {
@@ -528,8 +580,11 @@ async function manusResult(taskId, env) {
       return `⏳ Task not yet complete.\n\nStatus: **${data.status}**\n\nUse \`manus_status\` to check progress.`;
     }
 
-    const result = data.result || data.output || data.response || 'No result content found';
-    return `✅ **Manus Result**\n\nTask ID: \`${taskId}\`\n\n---\n\n${result}`;
+    // Try multiple possible result fields and format properly
+    const resultContent = data.result || data.output || data.response || data.data || data;
+    const formatted = formatManusResponse(resultContent);
+    
+    return `✅ **Manus Result**\n\nTask ID: \`${taskId}\`\n\n---\n\n${formatted}`;
 
   } catch (error) {
     return `❌ Error getting result: ${error.message}`;
