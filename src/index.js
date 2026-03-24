@@ -424,7 +424,7 @@ async function manusResearch(prompt, wait = false, env) {
     const createRes = await fetch(`${MANUS_API}/tasks`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'API_KEY': apiKey,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ prompt })
@@ -455,7 +455,7 @@ async function manusResearch(prompt, wait = false, env) {
       await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
 
       const statusRes = await fetch(`${MANUS_API}/tasks/${taskId}`, {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
+        headers: { 'API_KEY': apiKey }
       });
 
       if (!statusRes.ok) continue;
@@ -488,7 +488,7 @@ async function manusStatus(taskId, env) {
 
   try {
     const res = await fetch(`${MANUS_API}/tasks/${taskId}`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
+      headers: { 'API_KEY': apiKey }
     });
 
     if (!res.ok) {
@@ -514,7 +514,7 @@ async function manusResult(taskId, env) {
 
   try {
     const res = await fetch(`${MANUS_API}/tasks/${taskId}`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
+      headers: { 'API_KEY': apiKey }
     });
 
     if (!res.ok) {
