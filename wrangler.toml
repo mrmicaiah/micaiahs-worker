@@ -9,3 +9,8 @@ ENVIRONMENT = "production"
 [[services]]
 binding = "BOARD"
 service = "the-board"
+
+# KV namespace for Outer Rim workspace data
+[[kv_namespaces]]
+binding = "OUTER_RIM_KV"
+id = "PLACEHOLDER_CREATE_WITH_WRANGLER"
