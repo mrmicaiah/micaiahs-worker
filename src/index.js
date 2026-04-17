@@ -1,4 +1,4 @@
-// Micaiah's Worker - MCP Server for The Board + Manus AI
+// Micaiah's Worker - MCP Server for The Board + Manus AI + Outer Rim
 
 const BOARD_API = 'https://the-board.micaiah-tasks.workers.dev';
 const MANUS_API = 'https://api.manus.ai/v1';
@@ -13,17 +13,211 @@ export default {
       return handleMCP(request, env);
     }
     
+    // Outer Rim REST API endpoints (for Siri Shortcuts / phone automation)
+    if (url.pathname.startsWith('/api/outerrim/')) {
+      return handleOuterRimAPI(request, env, url);
+    }
+    
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({ status: 'ok', service: 'micaiahs-worker' }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
     
-    return new Response('Micaiah\'s Worker - MCP Server\n\nEndpoints:\n  /sse - MCP connection\n  /health - Health check', {
+    return new Response('Micaiah\'s Worker - MCP Server\n\nEndpoints:\n  /sse - MCP connection\n  /api/outerrim/* - Outer Rim REST API\n  /health - Health check', {
       headers: { 'Content-Type': 'text/plain' }
     });
   }
 };
+
+// ===== OUTER RIM REST API =====
+// For Siri Shortcuts and phone automation
+
+async function handleOuterRimAPI(request, env, url) {
+  const path = url.pathname.replace('/api/outerrim', '');
+  const method = request.method;
+  
+  // CORS headers
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type': 'application/json'
+  };
+  
+  if (method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+  
+  try {
+    // GET /api/outerrim/workspaces - List all workspaces
+    if (path === '/workspaces' && method === 'GET') {
+      const workspaces = await getOuterRimWorkspaces(env);
+      return new Response(JSON.stringify({ workspaces }), { headers: corsHeaders });
+    }
+    
+    // GET /api/outerrim/workspaces/:id - Get workspace
+    const workspaceMatch = path.match(/^\/workspaces\/([^\/]+)$/);
+    if (workspaceMatch && method === 'GET') {
+      const workspace = await getOuterRimWorkspace(env, workspaceMatch[1]);
+      if (!workspace) {
+        return new Response(JSON.stringify({ error: 'Workspace not found' }), { 
+          status: 404, headers: corsHeaders 
+        });
+      }
+      return new Response(JSON.stringify(workspace), { headers: corsHeaders });
+    }
+    
+    // GET /api/outerrim/workspaces/:id/notes - Get notes
+    const notesGetMatch = path.match(/^\/workspaces\/([^\/]+)\/notes$/);
+    if (notesGetMatch && method === 'GET') {
+      const workspace = await getOuterRimWorkspace(env, notesGetMatch[1]);
+      if (!workspace) {
+        return new Response(JSON.stringify({ error: 'Workspace not found' }), { 
+          status: 404, headers: corsHeaders 
+        });
+      }
+      return new Response(JSON.stringify({ 
+        id: workspace.id,
+        name: workspace.name,
+        notes: workspace.notes || '' 
+      }), { headers: corsHeaders });
+    }
+    
+    // PUT /api/outerrim/workspaces/:id/notes - Replace notes
+    const notesPutMatch = path.match(/^\/workspaces\/([^\/]+)\/notes$/);
+    if (notesPutMatch && method === 'PUT') {
+      const body = await request.json();
+      const result = await setOuterRimNotes(env, notesPutMatch[1], body.notes || '');
+      if (result.error) {
+        return new Response(JSON.stringify(result), { status: 404, headers: corsHeaders });
+      }
+      return new Response(JSON.stringify(result), { headers: corsHeaders });
+    }
+    
+    // POST /api/outerrim/workspaces/:id/notes - Append to notes
+    const notesPostMatch = path.match(/^\/workspaces\/([^\/]+)\/notes$/);
+    if (notesPostMatch && method === 'POST') {
+      const body = await request.json();
+      const result = await appendOuterRimNotes(env, notesPostMatch[1], body.text || '');
+      if (result.error) {
+        return new Response(JSON.stringify(result), { status: 404, headers: corsHeaders });
+      }
+      return new Response(JSON.stringify(result), { headers: corsHeaders });
+    }
+    
+    // POST /api/outerrim/sync - Full sync from Electron app
+    if (path === '/sync' && method === 'POST') {
+      const body = await request.json();
+      const result = await syncOuterRimWorkspaces(env, body.workspaces || []);
+      return new Response(JSON.stringify(result), { headers: corsHeaders });
+    }
+    
+    return new Response(JSON.stringify({ error: 'Not found' }), { 
+      status: 404, headers: corsHeaders 
+    });
+    
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), { 
+      status: 500, headers: corsHeaders 
+    });
+  }
+}
+
+// ===== OUTER RIM KV FUNCTIONS =====
+
+async function getOuterRimWorkspaces(env) {
+  const data = await env.OUTER_RIM_KV?.get('workspaces', 'json');
+  return data || [];
+}
+
+async function saveOuterRimWorkspaces(env, workspaces) {
+  await env.OUTER_RIM_KV?.put('workspaces', JSON.stringify(workspaces));
+}
+
+async function getOuterRimWorkspace(env, idOrName) {
+  const workspaces = await getOuterRimWorkspaces(env);
+  // Match by ID or by name (case-insensitive)
+  return workspaces.find(w => 
+    w.id === idOrName || 
+    w.name.toLowerCase() === idOrName.toLowerCase()
+  );
+}
+
+async function setOuterRimNotes(env, idOrName, notes) {
+  const workspaces = await getOuterRimWorkspaces(env);
+  const index = workspaces.findIndex(w => 
+    w.id === idOrName || 
+    w.name.toLowerCase() === idOrName.toLowerCase()
+  );
+  
+  if (index === -1) {
+    return { error: 'Workspace not found' };
+  }
+  
+  workspaces[index].notes = notes;
+  workspaces[index].updatedAt = new Date().toISOString();
+  await saveOuterRimWorkspaces(env, workspaces);
+  
+  return { 
+    success: true, 
+    id: workspaces[index].id,
+    name: workspaces[index].name,
+    notes: workspaces[index].notes 
+  };
+}
+
+async function appendOuterRimNotes(env, idOrName, text) {
+  const workspaces = await getOuterRimWorkspaces(env);
+  const index = workspaces.findIndex(w => 
+    w.id === idOrName || 
+    w.name.toLowerCase() === idOrName.toLowerCase()
+  );
+  
+  if (index === -1) {
+    return { error: 'Workspace not found' };
+  }
+  
+  const currentNotes = workspaces[index].notes || '';
+  const separator = currentNotes.trim() ? '\n\n' : '';
+  const timestamp = new Date().toLocaleString();
+  workspaces[index].notes = currentNotes + separator + `[${timestamp}] ${text}`;
+  workspaces[index].updatedAt = new Date().toISOString();
+  await saveOuterRimWorkspaces(env, workspaces);
+  
+  return { 
+    success: true, 
+    id: workspaces[index].id,
+    name: workspaces[index].name,
+    notes: workspaces[index].notes 
+  };
+}
+
+async function syncOuterRimWorkspaces(env, incomingWorkspaces) {
+  // Simple last-write-wins sync
+  // The Electron app sends its full workspace list, we merge/update
+  const existing = await getOuterRimWorkspaces(env);
+  const existingMap = new Map(existing.map(w => [w.id, w]));
+  
+  for (const incoming of incomingWorkspaces) {
+    const current = existingMap.get(incoming.id);
+    
+    // If workspace doesn't exist, or incoming is newer, use incoming
+    if (!current || new Date(incoming.updatedAt) > new Date(current.updatedAt || 0)) {
+      existingMap.set(incoming.id, {
+        id: incoming.id,
+        name: incoming.name,
+        notes: incoming.notes || '',
+        updatedAt: incoming.updatedAt || new Date().toISOString()
+      });
+    }
+  }
+  
+  const merged = Array.from(existingMap.values());
+  await saveOuterRimWorkspaces(env, merged);
+  
+  return { success: true, workspaces: merged };
+}
 
 async function handleMCP(request, env) {
   const url = new URL(request.url);
@@ -85,7 +279,7 @@ async function handleMCPMessage(message, env) {
           capabilities: { tools: {} },
           serverInfo: {
             name: 'micaiahs-worker',
-            version: '1.2.0'
+            version: '1.3.0'
           }
         }
       };
@@ -123,6 +317,51 @@ async function handleMCPMessage(message, env) {
 
 function getToolDefinitions() {
   return [
+    // ===== OUTER RIM TOOLS =====
+    {
+      name: 'outerrim_list_workspaces',
+      description: 'List all Outer Rim workspaces. Shows workspace names and IDs for use with other outerrim tools.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: []
+      }
+    },
+    {
+      name: 'outerrim_get_notes',
+      description: 'Get the notepad contents for an Outer Rim workspace. Use the workspace name or ID.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspace: { type: 'string', description: 'Workspace name or ID' }
+        },
+        required: ['workspace']
+      }
+    },
+    {
+      name: 'outerrim_set_notes',
+      description: 'Replace the entire notepad contents for an Outer Rim workspace.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspace: { type: 'string', description: 'Workspace name or ID' },
+          notes: { type: 'string', description: 'New notepad contents (replaces existing)' }
+        },
+        required: ['workspace', 'notes']
+      }
+    },
+    {
+      name: 'outerrim_append_notes',
+      description: 'Append text to an Outer Rim workspace notepad. Adds a timestamp automatically. Great for quick notes via Siri.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspace: { type: 'string', description: 'Workspace name or ID' },
+          text: { type: 'string', description: 'Text to append to the notepad' }
+        },
+        required: ['workspace', 'text']
+      }
+    },
     // ===== MANUS AI TOOLS =====
     {
       name: 'manus_research',
@@ -359,6 +598,15 @@ function getToolDefinitions() {
 async function executeTool(name, args, env) {
   try {
     switch (name) {
+      // Outer Rim tools
+      case 'outerrim_list_workspaces':
+        return await outerrimListWorkspaces(env);
+      case 'outerrim_get_notes':
+        return await outerrimGetNotes(env, args.workspace);
+      case 'outerrim_set_notes':
+        return await outerrimSetNotes(env, args.workspace, args.notes);
+      case 'outerrim_append_notes':
+        return await outerrimAppendNotes(env, args.workspace, args.text);
       // Manus tools
       case 'manus_research':
         return await manusResearch(args.prompt, args.wait, env);
@@ -409,6 +657,56 @@ async function executeTool(name, args, env) {
   } catch (error) {
     return `Error: ${error.message}`;
   }
+}
+
+// ===== OUTER RIM MCP TOOL IMPLEMENTATIONS =====
+
+async function outerrimListWorkspaces(env) {
+  const workspaces = await getOuterRimWorkspaces(env);
+  
+  if (!workspaces.length) {
+    return '📡 **Outer Rim Workspaces**\n\n_No workspaces synced yet. Open Outer Rim app and it will sync automatically._';
+  }
+  
+  let output = '📡 **Outer Rim Workspaces**\n\n';
+  
+  for (const w of workspaces) {
+    const notePreview = w.notes ? w.notes.substring(0, 50).replace(/\n/g, ' ') + '...' : '(empty)';
+    output += `• **${w.name}**\n  ID: \`${w.id}\`\n  Notes: ${notePreview}\n\n`;
+  }
+  
+  return output;
+}
+
+async function outerrimGetNotes(env, workspace) {
+  const w = await getOuterRimWorkspace(env, workspace);
+  
+  if (!w) {
+    return `❌ Workspace "${workspace}" not found. Use \`outerrim_list_workspaces\` to see available workspaces.`;
+  }
+  
+  const notes = w.notes || '(empty)';
+  return `📝 **${w.name}** - Notes\n\n${notes}`;
+}
+
+async function outerrimSetNotes(env, workspace, notes) {
+  const result = await setOuterRimNotes(env, workspace, notes);
+  
+  if (result.error) {
+    return `❌ ${result.error}. Use \`outerrim_list_workspaces\` to see available workspaces.`;
+  }
+  
+  return `✅ Updated notes for **${result.name}**\n\n${result.notes}`;
+}
+
+async function outerrimAppendNotes(env, workspace, text) {
+  const result = await appendOuterRimNotes(env, workspace, text);
+  
+  if (result.error) {
+    return `❌ ${result.error}. Use \`outerrim_list_workspaces\` to see available workspaces.`;
+  }
+  
+  return `✅ Appended to **${result.name}** notes:\n\n${result.notes}`;
 }
 
 // ===== MANUS RESPONSE FORMATTER =====
