@@ -13,4 +13,4 @@ service = "the-board"
 # KV namespace for Outer Rim workspace data
 [[kv_namespaces]]
 binding = "OUTER_RIM_KV"
-id = "PLACEHOLDER_CREATE_WITH_WRANGLER"
+id = "9a94c91aa6fb414c86ce246917431c26"
