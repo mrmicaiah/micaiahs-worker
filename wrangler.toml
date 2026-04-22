@@ -16,11 +16,9 @@ binding = "OUTER_RIM_KV"
 id = "9a94c91aa6fb414c86ce246917431c26"
 
 # KV namespace for Electron-app cloud sync (GitHub OAuth, versioned state per user)
-# Create with: wrangler kv:namespace create SYNC_KV
-# Then paste the returned id below and deploy.
 [[kv_namespaces]]
 binding = "SYNC_KV"
-id = "REPLACE_WITH_SYNC_KV_ID"
+id = "adbc2e12db4e49be91c21dcffaf93fc8"
 
 # Secrets required for sync (set with `wrangler secret put`):
 #   GITHUB_CLIENT_ID
