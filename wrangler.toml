@@ -23,4 +23,3 @@ id = "adbc2e12db4e49be91c21dcffaf93fc8"
 # Secrets required for sync (set with `wrangler secret put`):
 #   GITHUB_CLIENT_ID
 #   GITHUB_CLIENT_SECRET
-#   TOKEN_SIGNING_KEY   (random long string, any format)
