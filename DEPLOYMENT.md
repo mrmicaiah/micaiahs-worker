@@ -39,7 +39,7 @@ Go to https://github.com/settings/developers → **New OAuth App**.
 
 Register, then copy the **Client ID** and click **Generate a new client secret** → copy it too.
 
-### 3. Add the three new secrets
+### 3. Add the two required secrets
 
 ```bash
 wrangler secret put GITHUB_CLIENT_ID
@@ -47,9 +47,6 @@ wrangler secret put GITHUB_CLIENT_ID
 
 wrangler secret put GITHUB_CLIENT_SECRET
 # paste Client Secret
-
-wrangler secret put TOKEN_SIGNING_KEY
-# paste any random long string — openssl rand -hex 32 works fine
 ```
 
 Your existing `MANUS_API_KEY` is untouched.
@@ -95,6 +92,10 @@ All sync keys live in `SYNC_KV`:
 - `state:{githubUserId}:{app}` — the actual sync blobs
 
 Your existing `OUTER_RIM_KV` is untouched and continues to serve Siri.
+
+## Reserved for future use
+
+`TOKEN_SIGNING_KEY` — not currently used. The worker stores sync tokens as random opaque strings in KV and looks them up by key, so no cryptographic signing is involved. If we later switch to self-validating signed tokens (e.g. JWT-style), we'll set this secret then.
 
 ## Troubleshooting
 
