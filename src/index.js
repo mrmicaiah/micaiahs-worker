@@ -1,5 +1,7 @@
 // Micaiah's Worker - MCP Server for The Board + Manus AI + Outer Rim
 
+import { handleSync } from './sync.js';
+
 const BOARD_API = 'https://the-board.micaiah-tasks.workers.dev';
 const MANUS_API = 'https://api.manus.ai/v1';
 let globalEnv = null;
@@ -18,13 +20,19 @@ export default {
       return handleOuterRimAPI(request, env, url);
     }
     
+    // Cloud sync for Electron apps (Outer Rim, Parallel, Perimeter, Quartet)
+    // Uses a separate SYNC_KV namespace, GitHub OAuth, versioned writes.
+    if (url.pathname === '/sync' || url.pathname.startsWith('/sync/')) {
+      return handleSync(request, env);
+    }
+    
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({ status: 'ok', service: 'micaiahs-worker' }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
     
-    return new Response('Micaiah\'s Worker - MCP Server\n\nEndpoints:\n  /sse - MCP connection\n  /api/outerrim/* - Outer Rim REST API\n  /health - Health check', {
+    return new Response('Micaiah\'s Worker - MCP Server\n\nEndpoints:\n  /sse - MCP connection\n  /api/outerrim/* - Outer Rim REST API (Siri)\n  /sync/* - Cloud sync for Electron apps (GitHub OAuth)\n  /health - Health check', {
       headers: { 'Content-Type': 'text/plain' }
     });
   }
